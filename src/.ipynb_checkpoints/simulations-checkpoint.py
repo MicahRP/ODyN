@@ -417,6 +417,7 @@ class OpinionNetworkModel(ABC):
         cc = 0
         degrees = []
         for i in adjacency_df.index:
+            print(i)
             nbhd = np.where(adjacency_df.loc[:,i] != 0)[0]
             deg = len(nbhd)
             degrees.append(deg)
