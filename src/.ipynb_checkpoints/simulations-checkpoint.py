@@ -37,7 +37,8 @@ class OpinionNetworkModel(ABC):
                 include_weight = True,
                 left_reach = 0.8,
                 right_reach = 0.8,
-                threshold = -1
+                threshold = -1,
+                track_network_stats = True
                 ):
         """Returns initialized OpinionNetworkModel.
             
@@ -84,6 +85,7 @@ class OpinionNetworkModel(ABC):
         self.left_reach = left_reach
         self.right_reach = right_reach
         self.threshold = threshold
+        self.track_network_stats = track_network_stats
 
         self.agent_df = None
         self.belief_df = None
@@ -134,7 +136,11 @@ class OpinionNetworkModel(ABC):
         
         # Compute network statistics.
         logging.info("\n Computing network statistics...")
-        cc, md = self.compute_network_stats(adjacency_df)
+        if self.track_network_stats == True:
+            cc, md = self.compute_network_stats(adjacency_df)
+        else:
+            cc, md = float("nan"), float("nan")
+
         logging.info("\n Clustering Coefficient: {}".format(cc))
         logging.info("\n Mean Degree: {}".format(md))
 
@@ -417,7 +423,6 @@ class OpinionNetworkModel(ABC):
         cc = 0
         degrees = []
         for i in adjacency_df.index:
-            print(i)
             nbhd = np.where(adjacency_df.loc[:,i] != 0)[0]
             deg = len(nbhd)
             degrees.append(deg)
@@ -507,7 +512,10 @@ class NetworkSimulation(ABC):
             new_adjacency_df = model.compute_adjacency(prob_df)
             new_adjacency_df.columns = [int(i) for i in new_adjacency_df.columns]
             phase_dict["adjacency_df"] = new_adjacency_df
-            clust_coeff, mean_degree = model.compute_network_stats(new_adjacency_df)
+            if model.track_network_stats == True:
+                clust_coeff, mean_degree = model.compute_network_stats(new_adjacency_df)
+            else: # If network stats are not being recorded we will reprt NaN to indicate that
+                clust_coeff, mean_degree = float("nan"), float("nan")
             phase_dict["clust_coeff"] = clust_coeff
             phase_dict["mean_degree"] = mean_degree
 
