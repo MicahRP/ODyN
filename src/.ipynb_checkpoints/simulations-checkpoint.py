@@ -520,9 +520,15 @@ class NetworkSimulation(ABC):
             phase_dict["mean_degree"] = mean_degree
 
             results.append(phase_dict)
-            df[i+1] = new_belief_df["belief"].values
-
-            stopping_df[i] = df.iloc[:,i+1] - df.iloc[:,i]
+            # df[i+1] = new_belief_df["belief"].values
+            # above is the old code which caused fragmentation issues the new code (below) does not
+            df = pd.concat([df, new_belief_df["belief"]], axis=1, ignore_index = True)
+            
+            # stopping_df[i] = df.iloc[:,i+1] - df.iloc[:,i]
+            # above is the old code which caused fragmentation issues the new code (below) does not 
+            stopping_df = pd.concat([stopping_df, df.iloc[:,i+1] - df.iloc[:,i]],
+                                    axis=1,
+                                    ignore_index=True)
             i = i+1
             # Check that at least 5 iterations have been carried out.       
             if stopping_df.shape[1] > 5:
