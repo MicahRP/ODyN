@@ -7,6 +7,7 @@ import geopandas as gpd
 
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as grid_spec
+from matplotlib.colors import ListedColormap
 from scipy import stats
 
 from .geolocations import *
@@ -505,7 +506,68 @@ def plot_network(model):
 
     None
 
+def plot_opinion_network(network_info):
+    """ Draws the opinion network at a specific time.
 
+    Inputs: 
+        network_info : (dictionary) all the info of the network.
+
+    Outputs: 
+        Plots the opinion network.
+    """
+    # Load point df.
+    belief_df = network_info['belief_df']
+
+    fig, ax = plt.subplots(figsize = (8,8))
+
+    adjacency_df = network_info['adjacency_df']
+    adjacency_df.columns = [int(i) for i in adjacency_df.columns]
+
+    cc = network_info['clust_coeff']
+    md = network_info['mean_degree']
+    
+    N = 256
+    vals = np.ones((N, 4))
+    vals[:, 0] = np.linspace(231/N, 221/N, N)
+    vals[:, 1] = np.linspace(225/N, 28/N, N)
+    vals[:, 2] = np.linspace(239/N, 119/N, N)
+    cmap = ListedColormap(vals)
+    
+    # Plot people.    
+    ax.scatter(belief_df["x"], belief_df["y"], 
+               s = [int(w) for w in belief_df["weight"].values],
+               c = belief_df["belief"].values,
+               cmap = cmap)
+
+    for j in belief_df.index:
+        for k in np.where(adjacency_df.loc[j,:] == 1)[0]:
+            ax.plot((belief_df.loc[j,"x"], belief_df.loc[k,"x"]),
+                            (belief_df.loc[j,"y"], belief_df.loc[k,"y"]),                            
+                            color = "k", lw = .5, zorder = 0)
+
+    # Turn off axes
+    ax.set_axis_off()
+    
+    # Add title
+    title = "Connections"
+
+    title = title + "\n clustering coefficient: " + str(
+        np.around(cc, decimals = 3)) + "\n average in-degree: " + str(
+        np.around(md, decimals = 1))
+    ax.set_title(title)
+        
+    # Add legend
+    ax.scatter([],[],color = COLOR_MAP[0], label = "Not Hesitant")
+    ax.scatter([],[],color = COLOR_MAP[1], label = "Hesitant or Unsure")
+    ax.scatter([],[],color = COLOR_MAP[2], label = "Strongly Hesitant")     
+    plt.legend(loc = "best")
+    plt.axis()
+
+    plt.show()
+
+    None
+    
+    
 def get_ridge_plot(dynamic_belief_df, 
                 phases = [], 
                 reach_dict = None, 
@@ -609,5 +671,29 @@ def plot_mean_beliefs(results):
     ax.plot(time_steps,means, color = 'red', marker = 'o')
     ax.set_xlim(0, max(time_steps))
     ax.set_ylim(0, 2)
+    ax.grid(axis = 'y', visible = True)
+    plt.show
+    
+def plot_mean_degree(results):
+    """ Line graph of the mean degree of the model at every time step
+
+    Inputs: 
+        results: (dataframe) contains all the results of a simulation
+                 must be explicitly saved when running a simulatoin
+
+    Ouputs: 
+        Line graph of the mean beliefs.
+    """
+    means = []
+    for result in results:
+        means.append(result['mean_degree'])
+    time_steps = range(len(means))
+    y_interval = np.arange(0,2)
+    fig, ax = plt.subplots()
+    ax.set_title('Average in-degree across timesteps', fontsize=14)
+    ax.set_xlabel('Time step', fontsize=14)
+    ax.set_ylabel('average in-degree', fontsize=14)
+    ax.plot(time_steps,means, color = 'blue', marker = 'o')
+    ax.set_xlim(0, max(time_steps))
     ax.grid(axis = 'y', visible = True)
     plt.show

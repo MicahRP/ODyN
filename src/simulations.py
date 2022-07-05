@@ -96,7 +96,7 @@ class OpinionNetworkModel(ABC):
         self.clustering_coefficient = 0
         self.mean_degree = 0
 
-    def populate_model(self, num_agents = None, geo_df = None, bounding_box = None, show_plot = False):
+    def populate_model(self, num_agents = None, geo_df = None, bounding_box = None, show_plot = False, polygon = None, discrete = True):
         """ Fully initialized but untrained OpinionNetworkModel instance.
 
         Input:
@@ -106,14 +106,26 @@ class OpinionNetworkModel(ABC):
                 where agents are to be added.  If no box is given, agents are added
                 to a random triangle.
             show_plot: (bool) if true then plot is shown. 
+            polygon: (Polygon) polygon object of n vertices which
+                defines a polygon to be usedto plot agents
+            discrete: (bool) if true initial beliefs can only be 0, 1, or 2 if
+                      false then it can be any continuous value on that range.
         
         Output: 
             OpinionNetworkModel instance.
         """
         if bounding_box is None:
-            agent_df = self.add_random_agents_to_triangle(num_agents = num_agents, 
-                                                        geo_df = geo_df,
-                                                        show_plot = False)
+            if polygon is None:
+                agent_df = self.add_random_agents_to_triangle(num_agents = num_agents, 
+                                                            geo_df = geo_df,
+                                                            show_plot = False)
+            else:
+                if polygon == True:
+                    polygon = None
+                agent_df = self.add_random_agents_to_polygon(num_agents = num_agents,
+                                                            geo_df = geo_df,
+                                                            polygon_object = polygon,
+                                                            show_plot = False)
         else:
             if geo_df is None:
                 raise ValueError("If a bounding box is specified, then a "
@@ -124,7 +136,7 @@ class OpinionNetworkModel(ABC):
 
         logging.info("\n {} agents added.".format(agent_df.shape[0]))
         
-        belief_df = self.assign_weights_and_beliefs(agent_df)
+        belief_df = self.assign_weights_and_beliefs(agent_df, discrete)
         logging.info("\n Weights and beliefs assigned.")
 
         prob_df = self.compute_probability_array(belief_df)
@@ -153,7 +165,16 @@ class OpinionNetworkModel(ABC):
         self.mean_degree = md
         
         if show_plot == True:
-            self.plot_initial_network()
+            #Need to use the visualisation that allows for continous values
+            if discrete == False:
+                network_info = {}
+                network_info["belief_df"] = belief_df
+                network_info["adjacency_df"] = adjacency_df
+                network_info["clust_coeff"] = cc
+                network_info["mean_degree"] = md
+                plot_opinion_network(network_info)
+            else:
+                self.plot_initial_network()
 
         return None
 
@@ -161,6 +182,79 @@ class OpinionNetworkModel(ABC):
         plot_network(self)
         return None
 
+    def add_random_agents_to_polygon(self, num_agents,
+                                     geo_df = None,
+                                     polygon_object = None,
+                                     show_plot = False):
+        """ Assign N points on arbitrary polygon using Poisson point process.
+        
+        Input:
+            num_agents: (int) number of agents to add to the triangle.  If None, 
+                then agents are added according to density.
+            geo_df: (dataframe) geographic datatframe including county geometry.
+            polygon_object: (Polygon) bounded poligonal region to be populated.
+            show_plot: (bool) if true then plot is shown. 
+
+        Returns: 
+            An num_agents x 2 dataframe of point coordinates.
+        """
+        if polygon_object is None:
+            # If no triangle is given, initialize square with area 1 km^2.       
+            polygon_object = Polygon([[0,0],[700,0], [700,700],[0,700]])
+            # If density is specified, adjust triangle size.
+            if geo_df is not None:
+                density = geo_df.loc[0,"density"]
+                b = 1419 * (num_agents/density) ** (1/2)
+                polygon_object = Polygon([[0,0],[b/2,0], [b/2,b/2],[0,b/2]])
+
+        bnd = list(polygon_object.boundary.coords)
+        gdf = gpd.GeoDataFrame(geometry = [polygon_object])
+
+        # Establish initial CRS
+        gdf.crs = "EPSG:3857"
+
+        # Set CRS to lat/lon
+        gdf = gdf.to_crs(epsg=4326) 
+
+        # Extract coordinates
+        co = list(gdf.loc[0,"geometry"].exterior.coords)
+        lon, lat = zip(*co)
+        pa = Proj(
+            "+proj=aea +lat_1=37.0 +lat_2=41.0 +lat_0=39.0 +lon_0=-106.55")
+        x, y = pa(lon, lat)
+        coord_proj = {"type": "Polygon", "coordinates": [zip(x, y)]}
+        area = shape(coord_proj).area / (10 ** 6) # area in km^2
+        
+        # Sample from uniform distribution on [0,1]
+        U = np.random.uniform(0,1, num_agents// (len(bnd) - 3))
+        V = np.random.uniform(0,1, num_agents// (len(bnd) - 3))
+        
+        UU = np.where(U + V > 1, 1-U, U)
+        VV = np.where(U + V > 1, 1-V, V) 
+        
+        # Shift triangle into origin and and place points.
+        agents = []
+        for i in range(len(bnd) - 3):
+            agent = ((UU.reshape(len(UU),-1) * (np.array(bnd[i + 2]) - np.array(bnd[0])).reshape(-1,2)) +
+                     (VV.reshape(len(VV),-1) * (np.array(bnd[i + 1]) - np.array(bnd[0])).reshape(-1,2)))
+            agents.append(agent)
+
+        # Shift points back to original position.
+        for i in range(len(agents)):
+            agents[i] = agents[i] + np.array(bnd[0]).reshape(-1,2)
+        
+        agents_df_list = []
+        for agent in agents:
+            agent_df = pd.DataFrame(agent, columns = ["x", "y"])
+            agents_df_list.append(agent_df)
+        
+        agents_df = pd.concat(agents_df_list, axis=0, ignore_index = True)
+    
+        if show_plot == True:
+            plot_agents_on_triangle(polygon_object, agents_df)
+
+        return agents_df
+    
     def add_random_agents_to_triangle(self, num_agents, geo_df = None, triangle_object = None, 
         show_plot = False):
         """ Assign N points on a triangle using Poisson point process.
@@ -296,11 +390,15 @@ class OpinionNetworkModel(ABC):
         
         return agent_df
 
-    def assign_weights_and_beliefs(self, agent_df, show_plot = False):
+    def assign_weights_and_beliefs(self, agent_df,
+                                   discrete = True,
+                                   show_plot = False):
         """ Assign weights and beliefs (i.e. modes) accoring to probabilities.
         
         Inputs: 
             agent_df: (dataframe) xy-coordinates for agents.
+            discrete: (bool) if true initial beliefs can only be 0, 1, or 2 if
+                      false then it can be any continuous value on that range.
             show_plot: (bool) if true then plot is shown. 
             
         Returns: 
@@ -314,8 +412,39 @@ class OpinionNetworkModel(ABC):
         assert np.sum(np.array(self.probabilities)) == 1, "Probabilities must sum to 1."
         
         belief_df["weight"] = np.random.uniform(0,1,belief_df.shape[0]) ** (k)
-        belief_df["belief"] = np.random.choice(modes, belief_df.shape[0], 
-                                p = self.probabilities)
+        if discrete == True:
+            belief_df["belief"] = np.random.choice(modes, belief_df.shape[0], 
+                                    p = self.probabilities)
+        elif discrete == False:
+            beliefs = []
+            for i in modes:
+                belief = np.random.default_rng().normal(i,
+                                                        [0.3],
+                                                        int(np.ceil(
+                                                        self.probabilities[i]
+                                                        * belief_df.shape[0])))
+                beliefs.extend(belief)
+            """ Mapping function to make sure normally distributed values fall
+                within range
+                
+                Inputs:
+                    x: (float) number to be bounded
+                Returns:
+                    a float within the range
+            """
+            def fix_distribution(x):
+                if x < 0:
+                    return -x
+                elif x > 2:
+                    return 2 - (x - 2)
+                else:
+                    return x
+
+            beliefs = map(fix_distribution, beliefs)
+            beliefs = list(beliefs)
+            np.random.default_rng().shuffle(beliefs)
+            belief_df["belief"] = beliefs
+        
         belief_df["decile"] = pd.qcut(belief_df["weight"], q = 100, labels = [
                                 i for i in range(1,101)])
 
